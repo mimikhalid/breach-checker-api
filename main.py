@@ -3,7 +3,6 @@ from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import os
-import hashlib
 from datetime import datetime
 
 app = FastAPI(
@@ -20,7 +19,7 @@ app.add_middleware(
 )
 
 # -------------------------------------------------------
-# Auth — simple API key check
+# Auth
 # -------------------------------------------------------
 API_KEY = os.getenv("API_KEY", "changeme-set-your-own-key")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -48,10 +47,30 @@ def check_leakcheck(email: str) -> dict:
             found = data.get("found", False)
             sources = data.get("sources", [])
 
+            # Normalize into breaches format expected by backend node
+            breaches = []
+            for s in sources:
+                if isinstance(s, dict):
+                    breaches.append({
+                        "name": s.get("name", ""),
+                        "date": s.get("date") or None,
+                        "data_classes": [],
+                        "is_verified": False,
+                        "is_sensitive": False,
+                    })
+                elif isinstance(s, str):
+                    breaches.append({
+                        "name": s,
+                        "date": None,
+                        "data_classes": [],
+                        "is_verified": False,
+                        "is_sensitive": False,
+                    })
+
             return {
-                "breached": found,
-                "breach_count": len(sources) if found else 0,
-                "sources": sources if found else [],
+                "breached": bool(found),
+                "breach_count": len(breaches),
+                "breaches": breaches,
             }
 
         elif resp.status_code == 429:
@@ -96,7 +115,7 @@ def check_email(email: str, api_key: str = Depends(verify_api_key)):
     Returns:
     - breached: true/false
     - breach_count: number of breaches
-    - sources: list of breach source names
+    - breaches: list of breach details (name, date, data_classes, is_verified, is_sensitive)
     """
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Invalid email format.")
@@ -108,6 +127,6 @@ def check_email(email: str, api_key: str = Depends(verify_api_key)):
         "email": email,
         "breached": result["breached"],
         "breach_count": result["breach_count"],
-        "sources": result["sources"],
+        "breaches": result["breaches"],
         "checked_at": datetime.utcnow().isoformat(),
     }
